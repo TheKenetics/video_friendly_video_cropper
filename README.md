@@ -8,16 +8,21 @@ This addon aims to provide a slightly easier way to just crop videos and as a bo
 
 # How
 Have an empty scene with just a camera  
+![Picture showing an empty scene](GithubImages/man_empty_scene.png)  
 Open a shader graph editor  
+![Picture showing the corner of a shader editor](GithubImages/man_open_shader_editor.png)  
 Switch its mode to World  
+![Picture showing a shader editor in world mode](GithubImages/man_shader_world.png)  
 create a node setup like this,  
 a tex coordinate (Window) go to Image Texture, going into Background or Emission going into World Output  
+![Picture showing a node setup](GithubImages/man_node_setup.png)  
 load your video in the image tex node
 
 To preview the video in 3D view, switch to Rendered view, works for Cycles and Eevee
 If your background is a checkerboard, Go to Render Properties > Film > Disable TransparentZ
 
 To remove repetition outside of the camera view, go to Camera Settings > Viewport Display > Passerpartout = 1.0
+![Animation showing the effect of passepartout](GithubImages/man_passepartout.png)  
 
 To crop the video, draw a render border inside of camera view (Ctrl + B in object mode)
 
