@@ -2,8 +2,8 @@ bl_info = {
 	"name": "Friendly Video Cropper",
 	"author": "Kenetics",
 	"version": (0, 1),
-	"blender": (2, 80, 0),
-	"location": "View3D > Toolshelf > Add Objects",
+	"blender": (2, 93, 0),
+	"location": "Properties > Output > Video Cropper Panel",
 	"description": "Allows you to crop videos with camera render border",
 	"warning": "",
 	"wiki_url": "",
@@ -19,7 +19,7 @@ from bpy.types import PropertyGroup, UIList, Operator, Panel, AddonPreferences
 def make_ffmpeg_args(context, preview=False):
 	"""Returns string to use as args for ffmpeg command"""
 	render = context.scene.render
-	settings = context.scene.fvc_settings
+	settings = get_fvc_settings(context)
 	args = []
 	
 	file_arg = context.scene.world.node_tree.nodes.active.image.filepath
@@ -38,14 +38,12 @@ def make_ffmpeg_args(context, preview=False):
 	scale_width += scale_width % 2
 	
 	# Append input file
-	args += ["-i", file_arg]
+	args += ("-i", file_arg)
 	if not preview:
 		if settings.use_start_seconds:
-			args.append("-ss")
-			args.append(f"{settings.start_seconds}")
+			args += ("-ss", str(settings.start_seconds))
 		if settings.use_end_seconds:
-			args.append("-to")
-			args.append(str(settings.end_seconds))
+			args += ("-to", str(settings.end_seconds))
 	# append filters
 	filters = []
 	# for looping apngs
@@ -70,8 +68,8 @@ def make_ffmpeg_args(context, preview=False):
 		filter_graphs = ";".join(filter_graphs)
 		filters.append(filter_graphs)
 	
-	args += ["-vf", f'{", ".join(filters)}']
-
+	# join filters together with comma space and add filters to args
+	args += ("-vf", f'{", ".join(filters)}')
 
 	# Append output arg
 	if not preview:
@@ -80,29 +78,26 @@ def make_ffmpeg_args(context, preview=False):
 
 		# limit output fps
 		if settings.use_fps_limit:
-			args.append("-r")
-			args.append(str(settings.fps_limit))
+			args += ("-r", str(settings.fps_limit))
 
 		if settings.make_apng:
 			# make loop forever
-			args.append("-plays")
-			args.append("0")
+			args += ("-plays", "0")
 			# slow compress
-			args.append("-pred")
-			args.append(settings.apng_compression_type)
+			args += ("-pred", settings.apng_compression_type)
 			# output filepath
 			args.append(file_arg[:file_arg.rfind(".")] + settings.name_suffix + "-cropped" + ".apng")
 		else:
+			# file_arg[:file_arg.rfind(".")] gets the string up to the last .
+			# so "asd.123.txt" becomes "asd.123"
+			# file_arg[file_arg.rfind("."):] gets the string that comes after the last . and includes the .
+			# so "asd.123.txt" becomes ".txt"
 			args.append(file_arg[:file_arg.rfind(".")] + settings.name_suffix + "-cropped" + file_arg[file_arg.rfind("."):])
 	else:
 		if settings.use_start_seconds:
-			args.append("-ss")
-			args.append(f"{settings.start_seconds}")
-			#args.append(f"{math.floor(settings.start_seconds)}")
-			#args.append(f"00:00:00")
+			args += ("-ss", f"{settings.start_seconds}")
 		if settings.use_end_seconds:
-			args.append("-t")
-			args.append(str(settings.end_seconds - settings.start_seconds))
+			args += ("-t", str(settings.end_seconds - settings.start_seconds))
 	
 	return args
 
@@ -124,6 +119,15 @@ def error_check(self, context):
 		self.report({"ERROR"}, "World tex node doesnt have a file path")
 		return {"CANCELLED"}
 	return {}
+
+def get_addon_preferences():
+	return bpy.context.preferences.addons[__package__].preferences
+
+def get_fvc_settings(context=None):
+	if context:
+		return context.scene.fvc_settings
+	else:
+		return bpy.context.scene.fvc_settings
 
 
 ## Structs
@@ -202,13 +206,19 @@ class FVC_OT_preview_ffmpeg_command(Operator):
 		if "CANCELLED" in error_check(self, context):
 			return {"CANCELLED"}
 
-		command = ["ffplay"]
+		prefs = get_addon_preferences()
+		
+		command = []
 		# check prefs for override
+		if prefs.override_ffplay:
+			command = [prefs.override_ffplay]
+		else:
+			command = ["ffplay"]
 
 		# add args
 		command += make_ffmpeg_args(context, preview=True)
 		# run ffplay command
-		print(f"Running: {command}")
+		print(f"Running: {' '.join(command)}")
 		subprocess.run(command)
 
 		return {'FINISHED'}
@@ -230,13 +240,19 @@ class FVC_OT_crop_ffmpeg_command(Operator):
 		if "CANCELLED" in error_check(self, context):
 			return {"CANCELLED"}
 		
-		command = ["ffmpeg"]
+		prefs = get_addon_preferences()
+		
+		command = []
 		# check prefs for override
+		if prefs.override_ffmpeg:
+			command = [prefs.override_ffmpeg]
+		else:
+			command = ["ffmpeg"]
 
 		# add args
 		command += make_ffmpeg_args(context)
 		# run ffplay command
-		print(f"Running: {command}")
+		print(f"Running: {' '.join(command)}")
 		subprocess.run(command)
 
 		return {'FINISHED'}
@@ -251,7 +267,7 @@ class FVC_PT_video_cropper_panel(Panel):
 
 	def draw(self, context):
 		layout = self.layout
-		settings = context.scene.fvc_settings
+		settings = get_fvc_settings(context)
 		layout.prop(settings, "make_apng", icon="OUTLINER_OB_IMAGE")
 		if settings.make_apng:
 			layout.prop(settings, "apng_compression_type")
@@ -278,12 +294,47 @@ class FVC_PT_video_cropper_panel(Panel):
 		col.operator(FVC_OT_crop_ffmpeg_command.bl_idname, icon="OUTLINER_DATA_CAMERA")
 
 
+## Preferences
+class FVC_addon_preferences(AddonPreferences):
+	bl_idname = __package__
+	
+	# Properties
+	override_ffmpeg : StringProperty(
+		name = "Override FFmpeg Path",
+		description = "Path to use for FFmpeg",
+		default = ""
+	)
+	override_ffplay : StringProperty(
+		name = "Override FFplay Path",
+		description = "Path to use for FFplay",
+		default = ""
+	)
+	show_mini_manual : BoolProperty(name="Show Mini Manual", default=False)
+
+	def draw(self, context):
+		layout = self.layout
+		
+		layout.prop(self, "override_ffmpeg")
+		layout.prop(self, "override_ffplay")
+		
+		layout.prop(self, "show_mini_manual", toggle=True)
+		
+		if self.show_mini_manual:
+			layout.label(text="Using Prepare Bake:", icon="DOT")
+			layout.label(text="Go to Properties window > Render tab > Bake Helper section",icon="THREE_DOTS")
+			layout.label(text="When you want to bake, click the Prepare Bake button.",icon="THREE_DOTS")
+			layout.label(text="Bake Helper will create and select its nodes under the Material Output node.",icon="THREE_DOTS")
+			layout.label(text="Change the Bake Helper node's settings, e.g. the image you'll be baking to, if you need to.",icon="THREE_DOTS")
+			layout.label(text="After that, the selected objects should be ready to bake.",icon="THREE_DOTS")
+
+
 ## Register
 classes = (
 	FVC_ExportSettings,
 	FVC_OT_preview_ffmpeg_command,
 	FVC_OT_crop_ffmpeg_command,
-	FVC_PT_video_cropper_panel
+	FVC_PT_video_cropper_panel,
+	FVC_addon_preferences
 )
 
 def register():
