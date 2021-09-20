@@ -14,89 +14,50 @@ import bpy, math, subprocess
 from bpy.props import EnumProperty, IntProperty, FloatVectorProperty, BoolProperty, FloatProperty, StringProperty
 from bpy.types import PropertyGroup, UIList, Operator, Panel, AddonPreferences
 
-"""
-TODO
-
-APNG Compression type
-
-"""
-
-"""
-General Notes to Self
-list(scene.somethingbig) - To see arrays in console
-
-Props
-String
-subtype = "DIR_PATH"
-
-Collections
-context.scene.collection - Master Scene collection
-context.collection - Active Collection
-collection.all_objects - all objects in this and child collections
-collection.objects - objects in this collection
-collection.children - child collections
-collection.children.link(collection2) - link collection2 as child of collection
-	will throw error if already in collection
-collection.children.unlink(collection2) - unlink collection2 as child of collection
-collection.objects.link(obj) - link object to collection
-collection.objects.unlink(obj) - unlink object
-
-Window
-context.area.type - Type of area
-
-Enum
-Dynamic
-def get_enum_items(self, context):
-	enum_list = []
-	
-	for index, obj in enumerate(context.selected_objects):
-		enum_list.append( (obj.name, obj.name, "", "", index) )
-	
-	return enum_list
-obj_name : EnumProperty(
-		items=get_enum_items,
-		name="Object Name",
-		description=""
-	)
-Static
-obj_name : EnumProperty(
-		items=[
-			("ITEM","Item Name", "Item Description", "UI_ICON", 0),
-			("ITEM2","Item Name2", "Item Description", "UI_ICON", 1)
-		],
-		name="Object Name",
-		description=""
-	)
-"""
 
 ## Helper Functions
 def make_ffmpeg_args(context, preview=False):
 	"""Returns string to use as args for ffmpeg command"""
 	render = context.scene.render
-	settings = context.window_manager.fvc_settings
+	settings = context.scene.fvc_settings
 	args = []
 	
 	file_arg = context.scene.world.node_tree.nodes.active.image.filepath
 	
-	# calc cropping
-	crop_top_left_x = math.floor(render.resolution_x * render.border_min_x)
-	crop_top_left_y = math.floor(render.resolution_y * render.border_min_y)
-	crop_width = math.floor(render.resolution_x * (render.border_max_x - render.border_min_x))
-	crop_height = math.floor(render.resolution_y * (render.border_max_y - render.border_min_y))
+	resolution = context.scene.world.node_tree.nodes.active.image.size
 
+	# calc cropping
+	crop_top_left_x = math.floor(resolution[0] * render.border_min_x)
+	# border max y is top of border, min y is bottom of border
+	crop_top_left_y = math.floor(resolution[1] * (1 - render.border_max_y))
+	crop_width = math.floor(resolution[0] * (render.border_max_x - render.border_min_x))
+	crop_height = math.floor(resolution[1] * (render.border_max_y - render.border_min_y))
+
+	scale_width = math.floor(crop_width * settings.scale_multiplier)
+	# make even
+	scale_width += scale_width % 2
+	
 	# Append input file
 	args += ["-i", file_arg]
-	
+	if not preview:
+		if settings.use_start_seconds:
+			args.append("-ss")
+			args.append(f"{settings.start_seconds}")
+		if settings.use_end_seconds:
+			args.append("-to")
+			args.append(str(settings.end_seconds))
 	# append filters
 	filters = []
 	# for looping apngs
 	if settings.make_apng:
-		filters.append("setpts=PTS-STARTPTS")
+		filters.append(f"setpts={settings.speed}*PTS-STARTPTS")
+	else:
+		filters.append(f"setpts={settings.speed}*PTS")
 	# crop
 	filters.append(f"crop={crop_width}:{crop_height}:{crop_top_left_x}:{crop_top_left_y}")
 	# scale
 	if settings.use_scale_multiplier:
-		filters.append(f"scale={crop_width * settings.scale_multiplier}:-1")
+		filters.append(f"scale={scale_width}:-2")
 	
 	filter_graphs = []
 	# dont use with preview, because ffplay freezes with limit colors
@@ -112,31 +73,37 @@ def make_ffmpeg_args(context, preview=False):
 	args += ["-vf", f'{", ".join(filters)}']
 
 
-	if settings.use_start_seconds:
-		args.append("-ss")
-		args.append(settings.start_seconds)
-	if settings.use_end_seconds:
-		args.append("-to")
-		args.append(settings.end_seconds)
 	# Append output arg
 	if not preview:
 		# overwrite if existing
 		args.append("-y")
 
+		# limit output fps
 		if settings.use_fps_limit:
 			args.append("-r")
 			args.append(str(settings.fps_limit))
 
 		if settings.make_apng:
+			# make loop forever
 			args.append("-plays")
 			args.append("0")
-			# TODO: APNG compression type
 			# slow compress
-			#args.append("-pred")
-			#args.append("mixed")
-			args.append(file_arg[:file_arg.rfind(".")] + "-cropped" + ".apng")
+			args.append("-pred")
+			args.append(settings.apng_compression_type)
+			# output filepath
+			args.append(file_arg[:file_arg.rfind(".")] + settings.name_suffix + "-cropped" + ".apng")
 		else:
-			args.append(file_arg[:file_arg.rfind(".")] + "-cropped" + file_arg[file_arg.rfind("."):])
+			args.append(file_arg[:file_arg.rfind(".")] + settings.name_suffix + "-cropped" + file_arg[file_arg.rfind("."):])
+	else:
+		if settings.use_start_seconds:
+			args.append("-ss")
+			args.append(f"{settings.start_seconds}")
+			#args.append(f"{math.floor(settings.start_seconds)}")
+			#args.append(f"00:00:00")
+		if settings.use_end_seconds:
+			args.append("-t")
+			args.append(str(settings.end_seconds - settings.start_seconds))
+	
 	return args
 
 def error_check(self, context):
@@ -163,7 +130,7 @@ def error_check(self, context):
 class FVC_ExportSettings(PropertyGroup):
 	make_apng : BoolProperty(
 		name="Make aPNG",
-		description="If enabled, creates an animated PNG, else, creates the same format the source is in. Not compatible with preview.",
+		description="If enabled, creates an animated PNG. Else, creates the same format the source is in. Not previewable.",
 		default=False
 	)
 	use_start_seconds : BoolProperty(name="Use Start Seconds", default=False)
@@ -195,12 +162,28 @@ class FVC_ExportSettings(PropertyGroup):
 	use_colors_limit : BoolProperty(name="Use Colors Limit", default=False)
 	colors_limit : IntProperty(
 		name="Colors Limit",
-		description="Limit colors to this amount. Not compatible with preview.",
-		default=128,
+		description="Limit colors to this amount. Not previewable.",
+		default=64,
 		min=4,
 		max=255
 	)
-
+	apng_compression_type : EnumProperty(
+		name="aPNG Compression",
+		items=[
+			("none", "None", "No compression (Default)"),
+			("sub", "Sub", ""),
+			("up", "Up", ""),
+			("avg", "Average", ""),
+			("paeth", "Paeth", ""),
+			("mixed", "Mixed", "Uses best compression method per line (Best compression, slowest)")
+		]
+	)
+	name_suffix : StringProperty(
+		name="Name Suffix",
+		description="What to add after the filename. If blank, not used.",
+		default=""
+	)
+	speed : FloatProperty(name="Speed", description="Speed of video, 0.5 is 2x speed, 2.0 is half speed.", default=1.0)
 
 ## Operators
 class FVC_OT_preview_ffmpeg_command(Operator):
@@ -268,31 +251,34 @@ class FVC_PT_video_cropper_panel(Panel):
 
 	def draw(self, context):
 		layout = self.layout
-		settings = context.window_manager.fvc_settings
-		layout.prop(settings, "make_apng")
+		settings = context.scene.fvc_settings
+		layout.prop(settings, "make_apng", icon="OUTLINER_OB_IMAGE")
+		if settings.make_apng:
+			layout.prop(settings, "apng_compression_type")
 		col = layout.column(align=True)
 		split = col.split(factor=0.1, align=True)
-		split.prop(settings, "use_start_seconds", text="")
+		split.prop(settings, "use_start_seconds", text="", icon='TIME')
 		split.prop(settings, "start_seconds")
 		split = col.split(factor=0.1, align=True)
-		split.prop(settings, "use_end_seconds", text="")
+		split.prop(settings, "use_end_seconds", text="", icon='TIME')
 		split.prop(settings, "end_seconds")
 		split = col.split(factor=0.1, align=True)
-		split.prop(settings, "use_fps_limit", text="")
+		split.prop(settings, "use_fps_limit", text="", icon='RENDER_ANIMATION')
 		split.prop(settings, "fps_limit")
 		split = col.split(factor=0.1, align=True)
-		split.prop(settings, "use_scale_multiplier", text="")
+		split.prop(settings, "use_scale_multiplier", text="", icon='NORMALS_VERTEX')
 		split.prop(settings, "scale_multiplier")
 		split = col.split(factor=0.1, align=True)
-		split.prop(settings, "use_colors_limit", text="")
+		split.prop(settings, "use_colors_limit", text="", icon='COLORSET_10_VEC')
 		split.prop(settings, "colors_limit")
+		col.prop(settings, "speed")
+		layout.prop(settings, "name_suffix")
 		col = layout.column(align=True)
-		col.operator(FVC_OT_preview_ffmpeg_command.bl_idname)
-		col.operator(FVC_OT_crop_ffmpeg_command.bl_idname)
+		col.operator(FVC_OT_preview_ffmpeg_command.bl_idname, icon="WORKSPACE")
+		col.operator(FVC_OT_crop_ffmpeg_command.bl_idname, icon="OUTLINER_DATA_CAMERA")
 
 
 ## Register
-
 classes = (
 	FVC_ExportSettings,
 	FVC_OT_preview_ffmpeg_command,
@@ -305,7 +291,8 @@ def register():
 		bpy.utils.register_class(cls)
 	
 	## Add Custom Properties
-	bpy.types.WindowManager.fvc_settings = bpy.props.PointerProperty(type=FVC_ExportSettings)
+	bpy.types.Scene.fvc_settings = bpy.props.PointerProperty(type=FVC_ExportSettings)
+	#bpy.types.WindowManager.fvc_settings = bpy.props.PointerProperty(type=FVC_ExportSettings)
 	
 	## Append to UI
 	# bpy.types.CLASS.append(helper_func)
@@ -315,7 +302,8 @@ def unregister():
 	# bpy.types.CLASS.remove(helper_func)
 	
 	## Remove Custom Properties
-	del bpy.types.WindowManager.fvc_settings
+	#del bpy.types.WindowManager.fvc_settings
+	del bpy.types.Scene.fvc_settings
 	
 	for cls in reversed(classes):
 		bpy.utils.unregister_class(cls)
