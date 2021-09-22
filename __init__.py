@@ -320,12 +320,21 @@ class FVC_addon_preferences(AddonPreferences):
 		layout.prop(self, "show_mini_manual", toggle=True)
 		
 		if self.show_mini_manual:
-			layout.label(text="Using Prepare Bake:", icon="DOT")
-			layout.label(text="Go to Properties window > Render tab > Bake Helper section",icon="THREE_DOTS")
-			layout.label(text="When you want to bake, click the Prepare Bake button.",icon="THREE_DOTS")
-			layout.label(text="Bake Helper will create and select its nodes under the Material Output node.",icon="THREE_DOTS")
-			layout.label(text="Change the Bake Helper node's settings, e.g. the image you'll be baking to, if you need to.",icon="THREE_DOTS")
-			layout.label(text="After that, the selected objects should be ready to bake.",icon="THREE_DOTS")
+			layout.label(text="Using", icon="DOT")
+			layout.label(text="Have an empty scene with just a camera in it.",icon="THREE_DOTS")
+			layout.label(text="Open a Material Shader Graph Editor, and set it to World.",icon="THREE_DOTS")
+			layout.label(text="Connect Texture Coordinate (Window) to Image Texture Node to Emission Shader",icon="THREE_DOTS")
+			layout.label(text="Switch to camera view, and you'll be able to crop the video with Render Region (Ctrl + B)",icon="THREE_DOTS")
+			layout.label(text="Override Paths", icon="DOT")
+			layout.label(text="Set these settings if you are on Windows, or if you are using ffmpeg in a different place than where it usually is.",icon="THREE_DOTS")
+			layout.label(text="Passerpartout", icon="DOT")
+			layout.label(text="If you get repeating video outside of the camera view, you can remove it by:",icon="THREE_DOTS")
+			layout.label(text="Camera Settings > Viewport Display > Passerpartout = 1.0",icon="THREE_DOTS")
+			layout.label(text="Gray Checkerboard", icon="DOT")
+			layout.label(text="If you get a gray checkerboard instead of video preview, go to:",icon="THREE_DOTS")
+			layout.label(text="Render Properties > Film > Disable Transparent",icon="THREE_DOTS")
+			layout.label(text="Tips", icon="DOT")
+			layout.label(text="Sometimes using None aPNG compression makes a smaller file than Mixed.",icon="THREE_DOTS")
 
 
 ## Register
